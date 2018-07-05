@@ -64,6 +64,7 @@ SYNC_TIMEOUT = 0.1                    # timeout for syncing with bootloader
 MD5_TIMEOUT_PER_MB = 8                # timeout (per megabyte) for calculating md5sum
 ERASE_REGION_TIMEOUT_PER_MB = 30      # timeout (per megabyte) for erasing a region
 MEM_END_ROM_TIMEOUT = 0.05            # special short timeout for ESP_MEM_END, as it may never respond
+DEFAULT_CONNECT_TIMEOUT = 15          # timeout for connect (in seconds)
 
 
 def timeout_per_mb(seconds_per_mb, size_bytes):
@@ -196,7 +197,8 @@ class ESPLoader(object):
     # The number of bytes in the UART response that signify command status
     STATUS_BYTES_LENGTH = 2
 
-    def __init__(self, port=DEFAULT_PORT, baud=ESP_ROM_BAUD, trace_enabled=False):
+    def __init__(self, port=DEFAULT_PORT, baud=ESP_ROM_BAUD, trace_enabled=False,
+                 connect_timeout=DEFAULT_CONNECT_TIMEOUT):
         """Base constructor for ESPLoader bootloader interaction
 
         Don't call this constructor, either instantiate ESP8266ROM
@@ -219,6 +221,7 @@ class ESPLoader(object):
         # https://github.com/espressif/esptool/issues/44#issuecomment-107094446
         self._set_port_baudrate(baud)
         self._trace_enabled = trace_enabled
+        self._connect_timeout = connect_timeout
 
     def _set_port_baudrate(self, baud):
         try:
@@ -227,7 +230,8 @@ class ESPLoader(object):
             raise FatalError("Failed to set baud rate %d. The driver may not support this rate." % baud)
 
     @staticmethod
-    def detect_chip(port=DEFAULT_PORT, baud=ESP_ROM_BAUD, connect_mode='default_reset', trace_enabled=False):
+    def detect_chip(port=DEFAULT_PORT, baud=ESP_ROM_BAUD, connect_mode='default_reset',
+                    trace_enabled=False, connect_timeout=DEFAULT_CONNECT_TIMEOUT):
         """ Use serial access to detect the chip type.
 
         We use the UART's datecode register for this, it's mapped at
@@ -238,7 +242,7 @@ class ESPLoader(object):
         This routine automatically performs ESPLoader.connect() (passing
         connect_mode parameter) as part of querying the chip.
         """
-        detect_port = ESPLoader(port, baud, trace_enabled=trace_enabled)
+        detect_port = ESPLoader(port, baud, trace_enabled=trace_enabled, connect_timeout=connect_timeout)
         detect_port.connect(connect_mode)
         print('Detecting chip type...', end='')
         sys.stdout.flush()
@@ -247,7 +251,7 @@ class ESPLoader(object):
         for cls in [ESP8266ROM, ESP32ROM]:
             if date_reg == cls.DATE_REG_VALUE:
                 # don't connect a second time
-                inst = cls(detect_port._port, baud, trace_enabled=trace_enabled)
+                inst = cls(detect_port._port, baud, trace_enabled=trace_enabled, connect_timeout=connect_timeout)
                 print(' %s' % inst.CHIP_NAME)
                 return inst
         print('')
@@ -437,7 +441,8 @@ class ESPLoader(object):
         last_error = None
 
         try:
-            for _ in range(7):
+            start_time = time.time()
+            while time.time() - self._connect_timeout < start_time:
                 last_error = self._connect_attempt(mode=mode, esp32r0_delay=False)
                 if last_error is None:
                     return
@@ -2321,6 +2326,12 @@ def main():
         choices=ESP32ROM.OVERRIDE_VDDSDIO_CHOICES,
         nargs='?')
 
+    parser.add_argument(
+        '--connect_timeout',
+        help="Timeout (in seconds) for esptool to connect to device."
+             "The timeout is not very accurate, as we only break after one connect attempt fails.",
+        default=DEFAULT_CONNECT_TIMEOUT)
+
     subparsers = parser.add_subparsers(
         dest='operation',
         help='Run esptool {command} -h for additional help')
@@ -2512,13 +2523,13 @@ def main():
             print("Serial port %s" % each_port)
             try:
                 if args.chip == 'auto':
-                    esp = ESPLoader.detect_chip(each_port, initial_baud, args.before, args.trace)
+                    esp = ESPLoader.detect_chip(each_port, initial_baud, args.before, args.trace, args.connect_timeout)
                 else:
                     chip_class = {
                         'esp8266': ESP8266ROM,
                         'esp32': ESP32ROM,
                     }[args.chip]
-                    esp = chip_class(each_port, initial_baud, args.trace)
+                    esp = chip_class(each_port, initial_baud, args.trace, args.connect_timeout)
                     esp.connect(args.before)
                 break
             except FatalError as err:
