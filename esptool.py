@@ -65,6 +65,7 @@ MD5_TIMEOUT_PER_MB = 8                # timeout (per megabyte) for calculating m
 ERASE_REGION_TIMEOUT_PER_MB = 30      # timeout (per megabyte) for erasing a region
 MEM_END_ROM_TIMEOUT = 0.05            # special short timeout for ESP_MEM_END, as it may never respond
 DEFAULT_CONNECT_TIMEOUT = 15          # timeout for connect (in seconds)
+SERIAL_WRITE_TIMEOUT = 5              # timeout for serial write operations
 
 
 def timeout_per_mb(seconds_per_mb, size_bytes):
@@ -211,7 +212,7 @@ class ESPLoader(object):
 
         """
         if isinstance(port, basestring):
-            self._port = serial.serial_for_url(port)
+            self._port = serial.serial_for_url(port, write_timeout=SERIAL_WRITE_TIMEOUT)
         else:
             self._port = port
         self._slip_reader = slip_reader(self._port, self.trace)
